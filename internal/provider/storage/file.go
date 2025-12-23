@@ -52,7 +52,6 @@ func NewFileStorage(filePath string) (*FileStorage, error) {
 	return fs, nil
 }
 
-// reads storage from disk
 func (fs *FileStorage) load() error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -65,7 +64,6 @@ func (fs *FileStorage) load() error {
 	return json.Unmarshal(data, fs.data)
 }
 
-// write storage to disk
 func (fs *FileStorage) save() error {
 	// make directory if it doesnt exist
 	dir := filepath.Dir(fs.filePath)

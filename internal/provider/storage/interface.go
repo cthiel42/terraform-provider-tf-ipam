@@ -38,7 +38,6 @@ type Storage interface {
 	Close() error
 }
 
-// config for storage backends
 type Config struct {
 	Type string // "file", "azure", "dynamodb", etc.
 

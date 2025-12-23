@@ -282,7 +282,7 @@ func (r *AllocationResource) allocateCIDRFromPool(ctx context.Context, poolName 
 }
 
 // findAvailableCIDR searches for an available CIDR block of the requested prefix length
-// within the pool CIDR such that it doesn't overlap with any existing allocations
+// within the pool CIDR such that it doesn't overlap with any existing allocations.
 func findAvailableCIDR(poolNet *net.IPNet, prefixLength int, allocatedCIDRs []*net.IPNet) *net.IPNet {
 	poolPrefixLen, bits := poolNet.Mask.Size()
 
@@ -325,7 +325,7 @@ func findAvailableCIDR(poolNet *net.IPNet, prefixLength int, allocatedCIDRs []*n
 	return nil
 }
 
-// addIPOffset adds an offset to an IP address based on block size
+// addIPOffset adds an offset to an IP address based on block size.
 func addIPOffset(ip net.IP, blockIndex int, prefixLength int, totalBits int) {
 	// calculate IPs per block
 	hostBits := totalBits - prefixLength
