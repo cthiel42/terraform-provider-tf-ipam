@@ -83,7 +83,7 @@ func (r *PoolResource) Create(ctx context.Context, req resource.CreateRequest, r
 		return
 	}
 
-	// Validate CIDRs
+	// validate cidrs
 	var cidrs []string
 	resp.Diagnostics.Append(data.CIDRs.ElementsAs(ctx, &cidrs, false)...)
 	if resp.Diagnostics.HasError() {
@@ -100,7 +100,7 @@ func (r *PoolResource) Create(ctx context.Context, req resource.CreateRequest, r
 		}
 	}
 
-	// Save pool to storage
+	// save pool to storage
 	pool := &storage.Pool{
 		Name:  data.Name.ValueString(),
 		CIDRs: cidrs,
@@ -129,11 +129,10 @@ func (r *PoolResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	// Load pool from storage to verify it still exists
 	pool, err := r.provider.storage.GetPool(ctx, data.Name.ValueString())
 	if err != nil {
 		if err == storage.ErrNotFound {
-			// Pool was deleted outside Terraform
+			// pool was deleted outside terraform, remove from state
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -144,7 +143,7 @@ func (r *PoolResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	// Update state with storage data
+	// sync state with storage data
 	cidrs, diag := types.ListValueFrom(ctx, types.StringType, pool.CIDRs)
 	resp.Diagnostics.Append(diag...)
 	if resp.Diagnostics.HasError() {
@@ -163,7 +162,7 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		return
 	}
 
-	// Validate CIDRs
+	// validate cidrs
 	var cidrs []string
 	resp.Diagnostics.Append(data.CIDRs.ElementsAs(ctx, &cidrs, false)...)
 	if resp.Diagnostics.HasError() {
@@ -180,7 +179,7 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		}
 	}
 
-	// TODO: Check for allocations that would be invalidated by CIDR changes
+	// TODO: Check for allocations that would be invalidated by CIDR changes to the pool
 
 	// Update pool in storage
 	pool := &storage.Pool{
@@ -213,7 +212,7 @@ func (r *PoolResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 
 	poolName := data.Name.ValueString()
 
-	// Check for active allocations in storage
+	// check for active allocations in storage
 	allocations, err := r.provider.storage.ListAllocationsByPool(ctx, poolName)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -231,8 +230,8 @@ func (r *PoolResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
-	// Delete pool from storage
-	if err := r.provider.storage.DeletePool(ctx, poolName); err != nil {
+	err = r.provider.storage.DeletePool(ctx, poolName)
+	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Delete Pool",
 			fmt.Sprintf("Could not delete pool from storage: %s", err),
@@ -246,7 +245,7 @@ func (r *PoolResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 }
 
 func (r *PoolResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// Import format: name:cidr1,cidr2,cidr3
+	// import format: name:cidr1,cidr2,cidr3
 	parts := strings.SplitN(req.ID, ":", 2)
 	if len(parts) != 2 {
 		resp.Diagnostics.AddError(
@@ -259,7 +258,7 @@ func (r *PoolResource) ImportState(ctx context.Context, req resource.ImportState
 	name := parts[0]
 	cidrList := strings.Split(parts[1], ",")
 
-	// Validate CIDRs
+	// validate cidrs
 	cidrs := make([]string, 0, len(cidrList))
 	for _, cidr := range cidrList {
 		trimmed := strings.TrimSpace(cidr)
@@ -273,7 +272,6 @@ func (r *PoolResource) ImportState(ctx context.Context, req resource.ImportState
 		cidrs = append(cidrs, trimmed)
 	}
 
-	// Save to storage
 	pool := &storage.Pool{
 		Name:  name,
 		CIDRs: cidrs,
@@ -287,14 +285,11 @@ func (r *PoolResource) ImportState(ctx context.Context, req resource.ImportState
 		return
 	}
 
-	// Set state
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), name)...)
-
 	cidrsList, diag := types.ListValueFrom(ctx, types.StringType, cidrs)
 	resp.Diagnostics.Append(diag...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("cidrs"), cidrsList)...)
 }

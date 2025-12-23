@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"terraform-provider-tf-ipam/internal/provider/storage"
@@ -32,7 +33,10 @@ type IpamProvider struct {
 }
 
 // provider data model.
-type IpamProviderModel struct{}
+type IpamProviderModel struct {
+	StorageType types.String `tfsdk:"storage_type"`
+	FilePath    types.String `tfsdk:"file_path"`
+}
 
 func (p *IpamProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
 	resp.TypeName = "ipam"
@@ -40,7 +44,19 @@ func (p *IpamProvider) Metadata(ctx context.Context, req provider.MetadataReques
 }
 
 func (p *IpamProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
-	resp.Schema = schema.Schema{}
+	resp.Schema = schema.Schema{
+		MarkdownDescription: "IPAM provider for managing IP address pools and allocations",
+		Attributes: map[string]schema.Attribute{
+			"storage_type": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Storage backend type. Supported values: 'file' (default)",
+			},
+			"file_path": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Path to storage file for 'file' storage backend. Defaults to '.terraform/ipam-storage.json'",
+			},
+		},
+	}
 }
 
 func (p *IpamProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
@@ -53,8 +69,19 @@ func (p *IpamProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 
 	// set up storage backend
 	if p.storage == nil {
+		storageType := "file"
+		if !data.StorageType.IsNull() && !data.StorageType.IsUnknown() {
+			storageType = data.StorageType.ValueString()
+		}
+
+		filePath := ""
+		if !data.FilePath.IsNull() && !data.FilePath.IsUnknown() {
+			filePath = data.FilePath.ValueString()
+		}
+
 		storageConfig := &storage.Config{
-			Type: "file", // file storage is the default
+			Type:     storageType,
+			FilePath: filePath,
 		}
 
 		var err error
@@ -68,7 +95,8 @@ func (p *IpamProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		}
 
 		tflog.Debug(ctx, "Storage backend initialized", map[string]any{
-			"type": storageConfig.Type,
+			"type":      storageConfig.Type,
+			"file_path": storageConfig.FilePath,
 		})
 	}
 

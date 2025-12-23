@@ -33,7 +33,7 @@ func NewFileStorage(filePath string) (*FileStorage, error) {
 		if err := os.MkdirAll(terraformDir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create .terraform directory: %w", err)
 		}
-		filePath = filepath.Join(terraformDir, "ipam-state.json")
+		filePath = filepath.Join(terraformDir, "ipam-storage.json")
 	}
 
 	fs := &FileStorage{
@@ -46,13 +46,13 @@ func NewFileStorage(filePath string) (*FileStorage, error) {
 
 	// check if file already exists
 	if err := fs.load(); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to load state file: %w", err)
+		return nil, fmt.Errorf("failed to load storage file: %w", err)
 	}
 
 	return fs, nil
 }
 
-// reads state from disk
+// reads storage from disk
 func (fs *FileStorage) load() error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -65,7 +65,7 @@ func (fs *FileStorage) load() error {
 	return json.Unmarshal(data, fs.data)
 }
 
-// write state to disk
+// write storage to disk
 func (fs *FileStorage) save() error {
 	// make directory if it doesnt exist
 	dir := filepath.Dir(fs.filePath)
@@ -75,18 +75,18 @@ func (fs *FileStorage) save() error {
 
 	data, err := json.MarshalIndent(fs.data, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal state: %w", err)
+		return fmt.Errorf("failed to marshal storage data: %w", err)
 	}
 
-	// Write to temp file first, then rename for atomicity
+	// Write to tmp file first, then rename for atomicity
 	tempFile := fs.filePath + ".tmp"
 	if err := os.WriteFile(tempFile, data, 0644); err != nil {
-		return fmt.Errorf("failed to write state file: %w", err)
+		return fmt.Errorf("failed to write storage file: %w", err)
 	}
 
 	if err := os.Rename(tempFile, fs.filePath); err != nil {
-		os.Remove(tempFile) // cleanup temp file on error
-		return fmt.Errorf("failed to rename state file: %w", err)
+		os.Remove(tempFile) // cleanup tmp file on error
+		return fmt.Errorf("failed to rename storage file: %w", err)
 	}
 
 	return nil
@@ -151,7 +151,7 @@ func (fs *FileStorage) GetAllocation(ctx context.Context, id string) (*Allocatio
 		return nil, ErrNotFound
 	}
 
-	// Return a copy
+	// Return copy
 	allocCopy := *allocation
 	return &allocCopy, nil
 }
