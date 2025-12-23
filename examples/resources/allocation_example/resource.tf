@@ -20,8 +20,3 @@ resource "ipam_allocation" "example" {
   pool_name     = ipam_pool.example.name
   prefix_length = 24
 }
-
-# resource "ipam_allocation" "example_2" {
-#   pool_name     = ipam_pool.example.name
-#   prefix_length = 24
-# }

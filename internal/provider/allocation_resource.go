@@ -12,6 +12,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+
+	"terraform-provider-tf-ipam/internal/provider/storage"
 )
 
 var _ resource.Resource = &AllocationResource{}
@@ -21,12 +23,10 @@ func NewAllocationResource() resource.Resource {
 	return &AllocationResource{}
 }
 
-// resource implementation.
 type AllocationResource struct {
 	provider *IpamProvider
 }
 
-// resource data model.
 type AllocationResourceModel struct {
 	ID           types.String `tfsdk:"id"`
 	PoolName     types.String `tfsdk:"pool_name"`
@@ -100,7 +100,7 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	// validate prefix (0-128 for ipv6 compatibility)
+	// Validate prefix (0-128 for IPv6 compatibility)
 	prefixLength := int(data.PrefixLength.ValueInt64())
 	if prefixLength < 0 || prefixLength > 128 {
 		resp.Diagnostics.AddError(
@@ -141,17 +141,25 @@ func (r *AllocationResource) Read(ctx context.Context, req resource.ReadRequest,
 		return
 	}
 
-	// Register/update allocation in provider state during refresh
-	if r.provider != nil {
-		r.provider.mu.Lock()
-		r.provider.allocations[data.ID.ValueString()] = Allocation{
-			ID:           data.ID.ValueString(),
-			PoolName:     data.PoolName.ValueString(),
-			AllocatedIP:  data.AllocatedIP.ValueString(),
-			PrefixLength: int(data.PrefixLength.ValueInt64()),
+	// Verify allocation still exists in storage
+	allocation, err := r.provider.storage.GetAllocation(ctx, data.ID.ValueString())
+	if err != nil {
+		if err == storage.ErrNotFound {
+			// allocation was deleted outside Terraform
+			resp.State.RemoveResource(ctx)
+			return
 		}
-		r.provider.mu.Unlock()
+		resp.Diagnostics.AddError(
+			"Failed to Read Allocation",
+			fmt.Sprintf("Could not read allocation from storage: %s", err),
+		)
+		return
 	}
+
+	// sync state with storage data
+	data.AllocatedIP = types.StringValue(allocation.AllocatedIP)
+	data.PoolName = types.StringValue(allocation.PoolName)
+	data.PrefixLength = types.Int64Value(int64(allocation.PrefixLength))
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -176,11 +184,12 @@ func (r *AllocationResource) Delete(ctx context.Context, req resource.DeleteRequ
 		return
 	}
 
-	// Remove allocation from provider state
-	if r.provider != nil {
-		r.provider.mu.Lock()
-		delete(r.provider.allocations, data.ID.ValueString())
-		r.provider.mu.Unlock()
+	if err := r.provider.storage.DeleteAllocation(ctx, data.ID.ValueString()); err != nil {
+		resp.Diagnostics.AddError(
+			"Failed to Delete Allocation",
+			fmt.Sprintf("Could not delete allocation from storage: %s", err),
+		)
+		return
 	}
 
 	tflog.Trace(ctx, "deleted allocation resource", map[string]any{
@@ -191,25 +200,12 @@ func (r *AllocationResource) Delete(ctx context.Context, req resource.DeleteRequ
 
 func (r *AllocationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	// For import we expect the ID to be the allocation ID
-	// Need to look it up in the provider state
 	allocationID := req.ID
-
-	if r.provider == nil {
-		resp.Diagnostics.AddError(
-			"Provider Not Configured",
-			"Provider is not configured for import",
-		)
-		return
-	}
-
-	r.provider.mu.RLock()
-	allocation, exists := r.provider.allocations[allocationID]
-	r.provider.mu.RUnlock()
-
-	if !exists {
+	allocation, err := r.provider.storage.GetAllocation(ctx, allocationID)
+	if err != nil {
 		resp.Diagnostics.AddError(
 			"Allocation Not Found",
-			fmt.Sprintf("Allocation %s not found in provider state", allocationID),
+			fmt.Sprintf("Allocation %s not found in storage: %s", allocationID, err),
 		)
 		return
 	}
@@ -224,36 +220,30 @@ func (r *AllocationResource) ImportState(ctx context.Context, req resource.Impor
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-// allocateCIDRFromPool finds an available CIDR block in the pool and registers it.
+// allocateCIDRFromPool finds an available CIDR block in the pool and saves it to storage.
 // This implements a greedy search to find non-overlapping CIDR blocks
 // of the requested size within the pool's CIDR ranges.
 func (r *AllocationResource) allocateCIDRFromPool(ctx context.Context, poolName string, prefixLength int) (string, string, error) {
-	if r.provider == nil {
-		return "", "", fmt.Errorf("provider not configured")
+	pool, err := r.provider.storage.GetPool(ctx, poolName)
+	if err != nil {
+		return "", "", fmt.Errorf("pool %s not found: %w", poolName, err)
 	}
 
-	r.provider.mu.Lock()
-	defer r.provider.mu.Unlock()
-
-	// get pool info
-	pool, exists := r.provider.pools[poolName]
-	if !exists {
-		return "", "", fmt.Errorf("pool %s not found", poolName)
+	allocations, err := r.provider.storage.ListAllocationsByPool(ctx, poolName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list allocations: %w", err)
 	}
 
-	// collect all currently allocated CIDRs for this pool
 	var allocatedCIDRs []*net.IPNet
-	for _, alloc := range r.provider.allocations {
-		if alloc.PoolName == poolName {
-			_, allocNet, err := net.ParseCIDR(alloc.AllocatedIP)
-			if err != nil {
-				continue
-			}
-			allocatedCIDRs = append(allocatedCIDRs, allocNet)
+	for _, alloc := range allocations {
+		_, allocNet, err := net.ParseCIDR(alloc.AllocatedIP)
+		if err != nil {
+			continue
 		}
+		allocatedCIDRs = append(allocatedCIDRs, allocNet)
 	}
 
-	// find available CIDR block from each pool CIDR
+	// look for available CIDR block in each pool CIDR
 	for _, poolCIDRStr := range pool.CIDRs {
 		_, poolNet, err := net.ParseCIDR(poolCIDRStr)
 		if err != nil {
@@ -264,7 +254,7 @@ func (r *AllocationResource) allocateCIDRFromPool(ctx context.Context, poolName 
 
 		// cant allocate a larger block than the pool itself
 		if prefixLength < poolPrefixLen {
-			continue 
+			continue
 		}
 
 		// search for available cidr
@@ -273,12 +263,16 @@ func (r *AllocationResource) allocateCIDRFromPool(ctx context.Context, poolName 
 			allocatedIP := candidateCIDR.String()
 			allocationID := fmt.Sprintf("%s-%s", poolName, allocatedIP)
 
-			// Register the allocation in provider state
-			r.provider.allocations[allocationID] = Allocation{
+			// save new allocation to storage
+			allocation := &storage.Allocation{
 				ID:           allocationID,
 				PoolName:     poolName,
 				AllocatedIP:  allocatedIP,
 				PrefixLength: prefixLength,
+			}
+
+			if err := r.provider.storage.SaveAllocation(ctx, allocation); err != nil {
+				return "", "", fmt.Errorf("failed to save allocation: %w", err)
 			}
 
 			return allocatedIP, allocationID, nil
@@ -339,7 +333,7 @@ func addIPOffset(ip net.IP, blockIndex int, prefixLength int, totalBits int) {
 	blockSize := 1 << uint(hostBits)
 	offset := blockIndex * blockSize
 
-	// Add the offset to the IP address (big-endian)
+	// add the offset to the IP address (big-endian)
 	if len(ip) == 4 {
 		// IPv4
 		ipInt := uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
@@ -358,7 +352,6 @@ func addIPOffset(ip net.IP, blockIndex int, prefixLength int, totalBits int) {
 	}
 }
 
-// getLastIPInCIDR returns the last IP address in a CIDR block
 func getLastIPInCIDR(cidr *net.IPNet) net.IP {
 	ip := make(net.IP, len(cidr.IP))
 	copy(ip, cidr.IP)
@@ -371,15 +364,14 @@ func getLastIPInCIDR(cidr *net.IPNet) net.IP {
 	return ip
 }
 
-// cidrsOverlap checks if a candidate CIDR overlaps with any allocated CIDRs
 func cidrsOverlap(candidate *net.IPNet, allocated []*net.IPNet) bool {
 	for _, allocNet := range allocated {
-		// Check if either CIDR contains the other's network address
+		// check if either CIDR contains the other's network address
 		if candidate.Contains(allocNet.IP) || allocNet.Contains(candidate.IP) {
 			return true
 		}
 
-		// Also check if the last IP of candidate is in allocated or vice versa
+		// check if the last IP of candidate is in allocated or vice versa
 		candidateLastIP := getLastIPInCIDR(candidate)
 		allocLastIP := getLastIPInCIDR(allocNet)
 

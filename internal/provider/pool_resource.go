@@ -13,6 +13,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+
+	"terraform-provider-tf-ipam/internal/provider/storage"
 )
 
 var _ resource.Resource = &PoolResource{}
@@ -22,16 +24,13 @@ func NewPoolResource() resource.Resource {
 	return &PoolResource{}
 }
 
-// resource implementation
 type PoolResource struct {
 	provider *IpamProvider
 }
 
-// resource data model
 type PoolResourceModel struct {
-	Name        types.String `tfsdk:"name"`
-	CIDRs       types.List   `tfsdk:"cidrs"`
-	Allocations types.Map    `tfsdk:"allocations"`
+	Name  types.String `tfsdk:"name"`
+	CIDRs types.List   `tfsdk:"cidrs"`
 }
 
 func (r *PoolResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -54,11 +53,6 @@ func (r *PoolResource) Schema(ctx context.Context, req resource.SchemaRequest, r
 				ElementType:         types.StringType,
 				Required:            true,
 				MarkdownDescription: "List of CIDR blocks in the pool",
-			},
-			"allocations": schema.MapAttribute{
-				ElementType:         types.StringType,
-				Computed:            true,
-				MarkdownDescription: "Map of allocation IDs to allocated IP addresses",
 			},
 		},
 	}
@@ -106,28 +100,23 @@ func (r *PoolResource) Create(ctx context.Context, req resource.CreateRequest, r
 		}
 	}
 
+	// Save pool to storage
+	pool := &storage.Pool{
+		Name:  data.Name.ValueString(),
+		CIDRs: cidrs,
+	}
+
+	if err := r.provider.storage.SavePool(ctx, pool); err != nil {
+		resp.Diagnostics.AddError(
+			"Failed to Save Pool",
+			fmt.Sprintf("Could not save pool to storage: %s", err),
+		)
+		return
+	}
+
 	tflog.Trace(ctx, "created pool resource", map[string]interface{}{
 		"name": data.Name.ValueString(),
 	})
-
-	// init empty allocations map
-	allocations := make(map[string]string)
-	allocationsMap, diag := types.MapValueFrom(ctx, types.StringType, allocations)
-	resp.Diagnostics.Append(diag...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	data.Allocations = allocationsMap
-
-	// register pool with provider
-	if r.provider != nil {
-		r.provider.mu.Lock()
-		r.provider.pools[data.Name.ValueString()] = Pool{
-			Name:  data.Name.ValueString(),
-			CIDRs: cidrs,
-		}
-		r.provider.mu.Unlock()
-	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -140,24 +129,28 @@ func (r *PoolResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 		return
 	}
 
-	// Build allocations map from provider's runtime state
-	if r.provider != nil {
-		r.provider.mu.RLock()
-		allocations := make(map[string]string)
-		for id, alloc := range r.provider.allocations {
-			if alloc.PoolName == data.Name.ValueString() {
-				allocations[id] = alloc.AllocatedIP
-			}
-		}
-		r.provider.mu.RUnlock()
-
-		allocationsMap, diag := types.MapValueFrom(ctx, types.StringType, allocations)
-		resp.Diagnostics.Append(diag...)
-		if resp.Diagnostics.HasError() {
+	// Load pool from storage to verify it still exists
+	pool, err := r.provider.storage.GetPool(ctx, data.Name.ValueString())
+	if err != nil {
+		if err == storage.ErrNotFound {
+			// Pool was deleted outside Terraform
+			resp.State.RemoveResource(ctx)
 			return
 		}
-		data.Allocations = allocationsMap
+		resp.Diagnostics.AddError(
+			"Failed to Read Pool",
+			fmt.Sprintf("Could not read pool from storage: %s", err),
+		)
+		return
 	}
+
+	// Update state with storage data
+	cidrs, diag := types.ListValueFrom(ctx, types.StringType, pool.CIDRs)
+	resp.Diagnostics.Append(diag...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	data.CIDRs = cidrs
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -171,7 +164,6 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	// Validate CIDRs
-	// TODO: Check for an allocations that would be invalidated by CIDR changes
 	var cidrs []string
 	resp.Diagnostics.Append(data.CIDRs.ElementsAs(ctx, &cidrs, false)...)
 	if resp.Diagnostics.HasError() {
@@ -188,26 +180,25 @@ func (r *PoolResource) Update(ctx context.Context, req resource.UpdateRequest, r
 		}
 	}
 
+	// TODO: Check for allocations that would be invalidated by CIDR changes
+
+	// Update pool in storage
+	pool := &storage.Pool{
+		Name:  data.Name.ValueString(),
+		CIDRs: cidrs,
+	}
+
+	if err := r.provider.storage.SavePool(ctx, pool); err != nil {
+		resp.Diagnostics.AddError(
+			"Failed to Update Pool",
+			fmt.Sprintf("Could not update pool in storage: %s", err),
+		)
+		return
+	}
+
 	tflog.Trace(ctx, "updated pool resource", map[string]interface{}{
 		"name": data.Name.ValueString(),
 	})
-
-	// Update pool registration with provider
-	if r.provider != nil {
-		r.provider.mu.Lock()
-		r.provider.pools[data.Name.ValueString()] = Pool{
-			Name:  data.Name.ValueString(),
-			CIDRs: cidrs,
-		}
-		r.provider.mu.Unlock()
-	}
-
-	// Preserve allocations map from current state
-	var currentState PoolResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &currentState)...)
-	if !resp.Diagnostics.HasError() {
-		data.Allocations = currentState.Allocations
-	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -220,39 +211,42 @@ func (r *PoolResource) Delete(ctx context.Context, req resource.DeleteRequest, r
 		return
 	}
 
-	// check for active allocations
-	if r.provider != nil {
-		r.provider.mu.RLock()
-		hasAllocations := false
-		for _, alloc := range r.provider.allocations {
-			if alloc.PoolName == data.Name.ValueString() {
-				hasAllocations = true
-				break
-			}
-		}
-		r.provider.mu.RUnlock()
+	poolName := data.Name.ValueString()
 
-		if hasAllocations {
-			resp.Diagnostics.AddError(
-				"Cannot Delete Pool",
-				fmt.Sprintf("Pool %s has active allocations. Please delete all allocations before deleting the pool.", data.Name.ValueString()),
-			)
-			return
-		}
+	// Check for active allocations in storage
+	allocations, err := r.provider.storage.ListAllocationsByPool(ctx, poolName)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Failed to Check Allocations",
+			fmt.Sprintf("Could not check for allocations: %s", err),
+		)
+		return
+	}
 
-		// remove pool from provider
-		r.provider.mu.Lock()
-		delete(r.provider.pools, data.Name.ValueString())
-		r.provider.mu.Unlock()
+	if len(allocations) > 0 {
+		resp.Diagnostics.AddError(
+			"Cannot Delete Pool",
+			fmt.Sprintf("Pool %s has %d active allocations. Please delete all allocations before deleting the pool.", poolName, len(allocations)),
+		)
+		return
+	}
+
+	// Delete pool from storage
+	if err := r.provider.storage.DeletePool(ctx, poolName); err != nil {
+		resp.Diagnostics.AddError(
+			"Failed to Delete Pool",
+			fmt.Sprintf("Could not delete pool from storage: %s", err),
+		)
+		return
 	}
 
 	tflog.Trace(ctx, "deleted pool resource", map[string]interface{}{
-		"name": data.Name.ValueString(),
+		"name": poolName,
 	})
 }
 
 func (r *PoolResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	// import format: name:cidr1,cidr2,cidr3
+	// Import format: name:cidr1,cidr2,cidr3
 	parts := strings.SplitN(req.ID, ":", 2)
 	if len(parts) != 2 {
 		resp.Diagnostics.AddError(
@@ -265,24 +259,38 @@ func (r *PoolResource) ImportState(ctx context.Context, req resource.ImportState
 	name := parts[0]
 	cidrList := strings.Split(parts[1], ",")
 
+	// Validate CIDRs
+	cidrs := make([]string, 0, len(cidrList))
 	for _, cidr := range cidrList {
-		if _, _, err := net.ParseCIDR(strings.TrimSpace(cidr)); err != nil {
+		trimmed := strings.TrimSpace(cidr)
+		if _, _, err := net.ParseCIDR(trimmed); err != nil {
 			resp.Diagnostics.AddError(
 				"Invalid CIDR",
 				fmt.Sprintf("CIDR '%s' is not valid: %s", cidr, err),
 			)
 			return
 		}
+		cidrs = append(cidrs, trimmed)
 	}
 
+	// Save to storage
+	pool := &storage.Pool{
+		Name:  name,
+		CIDRs: cidrs,
+	}
+
+	if err := r.provider.storage.SavePool(ctx, pool); err != nil {
+		resp.Diagnostics.AddError(
+			"Failed to Import Pool",
+			fmt.Sprintf("Could not save imported pool to storage: %s", err),
+		)
+		return
+	}
+
+	// Set state
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), name)...)
 
-	// convert to terraform types so it can be set in diagnostics
-	cidrElements := make([]types.String, len(cidrList))
-	for i, cidr := range cidrList {
-		cidrElements[i] = types.StringValue(strings.TrimSpace(cidr))
-	}
-	cidrsList, diag := types.ListValueFrom(ctx, types.StringType, cidrElements)
+	cidrsList, diag := types.ListValueFrom(ctx, types.StringType, cidrs)
 	resp.Diagnostics.Append(diag...)
 	if resp.Diagnostics.HasError() {
 		return

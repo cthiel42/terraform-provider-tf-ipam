@@ -2,7 +2,7 @@ package provider
 
 import (
 	"context"
-	"sync"
+	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -11,6 +11,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+
+	"terraform-provider-tf-ipam/internal/provider/storage"
 )
 
 var _ provider.Provider = &IpamProvider{}
@@ -24,24 +27,8 @@ type IpamProvider struct {
 	// testing.
 	version string
 
-	// Runtime coordination state for resources
-	mu          sync.RWMutex
-	pools       map[string]Pool       // pool_name -> pool details
-	allocations map[string]Allocation // allocation_id -> allocation details
-}
-
-// pool representation for runtime state
-type Pool struct {
-	Name  string
-	CIDRs []string
-}
-
-// allocation representation for runtime state
-type Allocation struct {
-	ID           string
-	PoolName     string
-	AllocatedIP  string
-	PrefixLength int
+	// storage backend for persistent state
+	storage storage.Storage
 }
 
 // provider data model.
@@ -58,20 +45,40 @@ func (p *IpamProvider) Schema(ctx context.Context, req provider.SchemaRequest, r
 
 func (p *IpamProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var data IpamProviderModel
-
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// init coordination maps
-	if p.pools == nil {
-		p.pools = make(map[string]Pool)
+	// set up storage backend
+	if p.storage == nil {
+		storageConfig := &storage.Config{
+			Type: "file", // file storage is the default
+		}
+
+		var err error
+		p.storage, err = storage.Factory(ctx, storageConfig)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Storage Initialization Failed",
+				fmt.Sprintf("Failed to initialize storage backend: %s", err),
+			)
+			return
+		}
+
+		tflog.Debug(ctx, "Storage backend initialized", map[string]any{
+			"type": storageConfig.Type,
+		})
 	}
-	if p.allocations == nil {
-		p.allocations = make(map[string]Allocation)
-	}
+
+	// Pass provider instance to resources so they can access storage
+	resp.ResourceData = p
+	resp.DataSourceData = p
+
+	tflog.Debug(ctx, "Provider configured successfully", map[string]any{
+		"provider_ptr": fmt.Sprintf("%p", p),
+	})
 }
 
 func (p *IpamProvider) Resources(ctx context.Context) []func() resource.Resource {
