@@ -15,10 +15,10 @@ type Pool struct {
 }
 
 type Allocation struct {
-	ID           string `json:"id"`
-	PoolName     string `json:"pool_name"`
-	AllocatedIP  string `json:"allocated_ip"`
-	PrefixLength int    `json:"prefix_length"`
+	ID            string `json:"id"`
+	PoolName      string `json:"pool_name"`
+	AllocatedCIDR string `json:"allocated_cidr"`
+	PrefixLength  int    `json:"prefix_length"`
 }
 
 type Storage interface {

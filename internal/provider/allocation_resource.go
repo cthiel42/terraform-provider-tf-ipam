@@ -28,10 +28,10 @@ type AllocationResource struct {
 }
 
 type AllocationResourceModel struct {
-	ID           types.String `tfsdk:"id"`
-	PoolName     types.String `tfsdk:"pool_name"`
-	AllocatedIP  types.String `tfsdk:"allocated_ip"`
-	PrefixLength types.Int64  `tfsdk:"prefix_length"`
+	ID            types.String `tfsdk:"id"`
+	PoolName      types.String `tfsdk:"pool_name"`
+	AllocatedCIDR types.String `tfsdk:"allocated_cidr"`
+	PrefixLength  types.Int64  `tfsdk:"prefix_length"`
 }
 
 func (r *AllocationResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -44,10 +44,10 @@ func (r *AllocationResource) Schema(ctx context.Context, req resource.SchemaRequ
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Computed:            true,
+				Required:            true,
 				MarkdownDescription: "Unique identifier for this allocation",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"pool_name": schema.StringAttribute{
@@ -57,16 +57,16 @@ func (r *AllocationResource) Schema(ctx context.Context, req resource.SchemaRequ
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"allocated_ip": schema.StringAttribute{
+			"allocated_cidr": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The allocated IP address in CIDR notation",
+				MarkdownDescription: "The allocated CIDR address",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"prefix_length": schema.Int64Attribute{
 				Required:            true,
-				MarkdownDescription: "Prefix length for the allocated IP (e.g., 32 for a single host)",
+				MarkdownDescription: "Prefix length for the allocated CIDR (e.g., 32 for a single IPv4 host)",
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.RequiresReplace(),
 				},
@@ -100,7 +100,6 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
-	// Validate prefix (0-128 for IPv6 compatibility)
 	prefixLength := int(data.PrefixLength.ValueInt64())
 	if prefixLength < 0 || prefixLength > 128 {
 		resp.Diagnostics.AddError(
@@ -112,7 +111,8 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 
 	// Find the pool and allocate the range
 	poolName := data.PoolName.ValueString()
-	allocatedIP, allocationID, err := r.allocateCIDRFromPool(ctx, poolName, prefixLength)
+	allocationID := data.ID.ValueString()
+	allocatedCIDR, err := r.allocateCIDRFromPool(ctx, poolName, allocationID, prefixLength)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Allocation Failed",
@@ -122,12 +122,12 @@ func (r *AllocationResource) Create(ctx context.Context, req resource.CreateRequ
 	}
 
 	data.ID = types.StringValue(allocationID)
-	data.AllocatedIP = types.StringValue(allocatedIP)
+	data.AllocatedCIDR = types.StringValue(allocatedCIDR)
 
 	tflog.Trace(ctx, "created allocation resource", map[string]any{
-		"id":           allocationID,
-		"pool_name":    poolName,
-		"allocated_ip": allocatedIP,
+		"id":             allocationID,
+		"pool_name":      poolName,
+		"allocated_cidr": allocatedCIDR,
 	})
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -157,7 +157,7 @@ func (r *AllocationResource) Read(ctx context.Context, req resource.ReadRequest,
 	}
 
 	// sync state with storage data
-	data.AllocatedIP = types.StringValue(allocation.AllocatedIP)
+	data.AllocatedCIDR = types.StringValue(allocation.AllocatedCIDR)
 	data.PoolName = types.StringValue(allocation.PoolName)
 	data.PrefixLength = types.Int64Value(int64(allocation.PrefixLength))
 
@@ -211,10 +211,10 @@ func (r *AllocationResource) ImportState(ctx context.Context, req resource.Impor
 	}
 
 	data := AllocationResourceModel{
-		ID:           types.StringValue(allocation.ID),
-		PoolName:     types.StringValue(allocation.PoolName),
-		AllocatedIP:  types.StringValue(allocation.AllocatedIP),
-		PrefixLength: types.Int64Value(int64(allocation.PrefixLength)),
+		ID:            types.StringValue(allocation.ID),
+		PoolName:      types.StringValue(allocation.PoolName),
+		AllocatedCIDR: types.StringValue(allocation.AllocatedCIDR),
+		PrefixLength:  types.Int64Value(int64(allocation.PrefixLength)),
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -223,20 +223,20 @@ func (r *AllocationResource) ImportState(ctx context.Context, req resource.Impor
 // allocateCIDRFromPool finds an available CIDR block in the pool and saves it to storage.
 // This implements a greedy search to find non-overlapping CIDR blocks
 // of the requested size within the pool's CIDR ranges.
-func (r *AllocationResource) allocateCIDRFromPool(ctx context.Context, poolName string, prefixLength int) (string, string, error) {
+func (r *AllocationResource) allocateCIDRFromPool(ctx context.Context, poolName string, allocationId string, prefixLength int) (string, error) {
 	pool, err := r.provider.storage.GetPool(ctx, poolName)
 	if err != nil {
-		return "", "", fmt.Errorf("pool %s not found: %w", poolName, err)
+		return "", fmt.Errorf("pool %s not found: %w", poolName, err)
 	}
 
 	allocations, err := r.provider.storage.ListAllocationsByPool(ctx, poolName)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to list allocations: %w", err)
+		return "", fmt.Errorf("failed to list allocations: %w", err)
 	}
 
 	var allocatedCIDRs []*net.IPNet
 	for _, alloc := range allocations {
-		_, allocNet, err := net.ParseCIDR(alloc.AllocatedIP)
+		_, allocNet, err := net.ParseCIDR(alloc.AllocatedCIDR)
 		if err != nil {
 			continue
 		}
@@ -260,26 +260,25 @@ func (r *AllocationResource) allocateCIDRFromPool(ctx context.Context, poolName 
 		// search for available cidr
 		candidateCIDR := findAvailableCIDR(poolNet, prefixLength, allocatedCIDRs)
 		if candidateCIDR != nil {
-			allocatedIP := candidateCIDR.String()
-			allocationID := fmt.Sprintf("%s-%s", poolName, allocatedIP)
+			allocatedCIDR := candidateCIDR.String()
 
 			// save new allocation to storage
 			allocation := &storage.Allocation{
-				ID:           allocationID,
-				PoolName:     poolName,
-				AllocatedIP:  allocatedIP,
-				PrefixLength: prefixLength,
+				ID:            allocationId,
+				PoolName:      poolName,
+				AllocatedCIDR: allocatedCIDR,
+				PrefixLength:  prefixLength,
 			}
 
 			if err := r.provider.storage.SaveAllocation(ctx, allocation); err != nil {
-				return "", "", fmt.Errorf("failed to save allocation: %w", err)
+				return "", fmt.Errorf("failed to save allocation: %w", err)
 			}
 
-			return allocatedIP, allocationID, nil
+			return allocatedCIDR, nil
 		}
 	}
 
-	return "", "", fmt.Errorf("no available CIDR blocks of size /%d in pool %s", prefixLength, poolName)
+	return "", fmt.Errorf("no available CIDR blocks of size /%d in pool %s", prefixLength, poolName)
 }
 
 // findAvailableCIDR searches for an available CIDR block of the requested prefix length
