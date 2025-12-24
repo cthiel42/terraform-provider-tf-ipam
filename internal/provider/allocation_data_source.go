@@ -3,12 +3,11 @@ package provider
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"terraform-provider-tf-ipam/internal/provider/storage"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 var _ datasource.DataSource = &AllocationDataSource{}
@@ -18,12 +17,14 @@ func NewAllocationDataSource() datasource.DataSource {
 }
 
 type AllocationDataSource struct {
-	client *http.Client
+	provider *IpamProvider
 }
 
 type AllocationDataSourceModel struct {
-	ConfigurableAttribute types.String `tfsdk:"configurable_attribute"`
-	Id                    types.String `tfsdk:"id"`
+	ID            types.String `tfsdk:"id"`
+	PoolName      types.String `tfsdk:"pool_name"`
+	AllocatedCIDR types.String `tfsdk:"allocated_cidr"`
+	PrefixLength  types.Int64  `tfsdk:"prefix_length"`
 }
 
 func (d *AllocationDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -32,16 +33,23 @@ func (d *AllocationDataSource) Metadata(ctx context.Context, req datasource.Meta
 
 func (d *AllocationDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		// This description is used by the documentation generator and the language server.
-		MarkdownDescription: "Allocation data source",
+		MarkdownDescription: "Allocation data source for retrieving IP allocations from a pool",
 
 		Attributes: map[string]schema.Attribute{
-			"configurable_attribute": schema.StringAttribute{
-				MarkdownDescription: "Example configurable attribute",
-				Optional:            true,
-			},
 			"id": schema.StringAttribute{
-				MarkdownDescription: "Example identifier",
+				MarkdownDescription: "Unique identifier for the allocation",
+				Required:            true,
+			},
+			"pool_name": schema.StringAttribute{
+				MarkdownDescription: "Name of the pool the allocation belongs to",
+				Required:            true,
+			},
+			"allocated_cidr": schema.StringAttribute{
+				MarkdownDescription: "CIDR block allocated to the resource",
+				Computed:            true,
+			},
+			"prefix_length": schema.Int64Attribute{
+				MarkdownDescription: "Prefix length of the allocated CIDR",
 				Computed:            true,
 			},
 		},
@@ -49,51 +57,48 @@ func (d *AllocationDataSource) Schema(ctx context.Context, req datasource.Schema
 }
 
 func (d *AllocationDataSource) Configure(ctx context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
-	// Prevent panic if the provider has not been configured.
 	if req.ProviderData == nil {
 		return
 	}
 
-	client, ok := req.ProviderData.(*http.Client)
-
+	provider, ok := req.ProviderData.(*IpamProvider)
 	if !ok {
 		resp.Diagnostics.AddError(
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *http.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			"Unexpected Resource Configure Type",
+			fmt.Sprintf("Expected *IpamProvider, got: %T", req.ProviderData),
 		)
-
 		return
 	}
 
-	d.client = client
+	d.provider = provider
 }
 
 func (d *AllocationDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var data AllocationDataSourceModel
 
-	// Read Terraform configuration data into the model
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
-
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// If applicable, this is a great opportunity to initialize any necessary
-	// provider client data and make a call using it.
-	// httpResp, err := d.client.Do(httpReq)
-	// if err != nil {
-	//     resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read example, got error: %s", err))
-	//     return
-	// }
+	allocation, err := d.provider.storage.GetAllocation(ctx, data.ID.ValueString())
+	if err != nil {
+		if err == storage.ErrNotFound {
+			// allocation was deleted outside Terraform
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError(
+			"Failed to Read Allocation",
+			fmt.Sprintf("Could not read allocation from storage: %s", err),
+		)
+		return
+	}
 
-	// For the purposes of this example code, hardcoding a response value to
-	// save into the Terraform state.
-	data.Id = types.StringValue("example-id")
+	// sync state with storage data
+	data.AllocatedCIDR = types.StringValue(allocation.AllocatedCIDR)
+	data.PoolName = types.StringValue(allocation.PoolName)
+	data.PrefixLength = types.Int64Value(int64(allocation.PrefixLength))
 
-	// Write logs using the tflog package
-	// Documentation: https://terraform.io/plugin/log
-	tflog.Trace(ctx, "read a data source")
-
-	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }

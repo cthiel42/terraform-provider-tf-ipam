@@ -1,3 +1,3 @@
-data "scaffolding_example" "example" {
-  configurable_attribute = "some-value"
+data "ipam_pool" "example" {
+  name = "pool_example"
 }
