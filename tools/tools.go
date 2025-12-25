@@ -10,4 +10,6 @@ package tools
 //go:generate terraform fmt -recursive ../examples/
 
 // Generate documentation.
-//go:generate go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate --provider-dir .. -provider-name ipam
+// Add go:generate in front of the below to add documentation generation. This is commented out to prevent manual
+// changes in the documentation from being overwritten.
+// go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate --provider-dir .. -provider-name ipam
