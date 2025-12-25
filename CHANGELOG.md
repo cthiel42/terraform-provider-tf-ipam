@@ -1,3 +1,14 @@
+## v1.0.0
+
+FEATURES
+- IPAM Storage now supports Azure Blob Storage
+
+UPDATES:
+- Test cases created for all provider resources and data sources
+
+BUGS:
+- Integer overflow issue was fixed for IPv6 allocations
+
 ## v1.0.3
 
 FEATURES:

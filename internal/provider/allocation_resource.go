@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"net"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -293,6 +294,14 @@ func findAvailableCIDR(poolNet *net.IPNet, prefixLength int, allocatedCIDRs []*n
 	}
 	numBlocks := 1 << uint(blockSizeDiff) // 2^(prefixLength - poolPrefixLen)
 
+	// Limit iterations to prevent hanging on large IPv6 address spaces
+	// For IPv6 /32 to /64 allocations, numBlocks can be 2^32 (4 billion+)
+	// Limiting to 100,000 iterations which is more than enough for practical use
+	maxIterations := 100000
+	if numBlocks > maxIterations {
+		numBlocks = maxIterations
+	}
+
 	requestedMask := net.CIDRMask(prefixLength, bits)
 
 	// Iterate through all possible CIDR blocks of the requested size within the pool
@@ -329,12 +338,11 @@ func findAvailableCIDR(poolNet *net.IPNet, prefixLength int, allocatedCIDRs []*n
 func addIPOffset(ip net.IP, blockIndex int, prefixLength int, totalBits int) {
 	// calculate IPs per block
 	hostBits := totalBits - prefixLength
-	blockSize := 1 << uint(hostBits)
-	offset := blockIndex * blockSize
 
-	// add the offset to the IP address (big-endian)
 	if len(ip) == 4 {
-		// IPv4
+		// IPv4 - simple 32-bit arithmetic
+		blockSize := 1 << uint(hostBits)
+		offset := blockIndex * blockSize
 		ipInt := uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
 		ipInt += uint32(offset)
 		ip[0] = byte(ipInt >> 24)
@@ -342,12 +350,17 @@ func addIPOffset(ip net.IP, blockIndex int, prefixLength int, totalBits int) {
 		ip[2] = byte(ipInt >> 8)
 		ip[3] = byte(ipInt)
 	} else {
-		// IPv6 - add offset from the right
-		for i := len(ip) - 1; i >= 0 && offset > 0; i-- {
-			offset += int(ip[i])
-			ip[i] = byte(offset & 0xFF)
-			offset >>= 8
-		}
+		// IPv6 - use big.Int for 128 bit arithmetic
+		ipBigInt := big.NewInt(0).SetBytes(ip)
+		offsetBigInt := big.NewInt(int64(blockIndex))
+		blockSizeBigInt := big.NewInt(0).Exp(big.NewInt(2), big.NewInt(int64(hostBits)), nil)
+		offsetBigInt.Mul(offsetBigInt, blockSizeBigInt)
+		ipBigInt.Add(ipBigInt, offsetBigInt)
+		offsetBytes := ipBigInt.Bytes()
+
+		// pad with zeros if necessary
+		copy(ip, make([]byte, len(ip)))
+		copy(ip[len(ip)-len(offsetBytes):], offsetBytes)
 	}
 }
 
