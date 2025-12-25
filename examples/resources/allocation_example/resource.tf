@@ -1,7 +1,8 @@
 terraform {
   required_providers {
     ipam = {
-      source = "hashicorp.com/edu/tf-ipam"
+      source = "cthiel42/tf-ipam"
+      version = "1.0.2"
     }
   }
 }

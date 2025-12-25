@@ -3,6 +3,15 @@
 FEATURES:
 
 UPDATES:
+- Documentation updates
+
+BUGS:
+
+## v1.0.1
+
+FEATURES:
+
+UPDATES:
 - Changes to CI generate step
 - Updated GPG signing key
 

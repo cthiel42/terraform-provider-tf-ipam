@@ -1,9 +1,26 @@
 # Terraform IP Address Manager (tf-ipam)
 
-This repository contains the source code for the tf-ipam provider, a Terraform provider for IP Address Management. Pool resources specify a CIDR to disperse IP's from, and allocation resources are used to dynamically allocate IP's or subnets from the pool.
+A lightweight Terraform provider for managing IP address pools and allocations. The IPAM Provider lets you declare and manage IP pools, allocate and release addresses through Terraform, and persist configurations to a storage backend (default: file). It is intended for simple IPAM workflows and automation in local or small-scale environments.
+
+Features
+- Create, update, and delete IP pools and prefixes
+- Allocate and release individual IP addresses with predictable, idempotent behavior
+- Configurable storage backend (file-based storage by default)
+- Simple schema and minimal external dependencies — ideal for local development and CI workflows
+
+Pool resources specify a CIDR to disperse IP's from, and allocation resources are used to dynamically allocate IP's or subnets from the pool.
 
 Quick example
 ```hcl
+terraform {
+  required_providers {
+    tf-ipam = {
+      source = "cthiel42/tf-ipam"
+      version = "1.0.2"
+    }
+  }
+}
+
 provider "ipam" {
   storage_type = "file"
   file_path    = ".terraform/ipam-storage.json"

@@ -17,7 +17,16 @@ Features
 
 Quick example
 ```hcl
-provider "ipam" {
+terraform {
+  required_providers {
+    tf-ipam = {
+      source = "cthiel42/tf-ipam"
+      version = "1.0.2"
+    }
+  }
+}
+
+provider "tf-ipam" {
   storage_type = "file"
   file_path    = ".terraform/ipam-storage.json"
 }
@@ -40,6 +49,16 @@ resource "ipam_allocation" "example_1" {
   id            = "allocation_example_1"
   pool_name     = ipam_pool.example.name
   prefix_length = 27
+}
+```
+
+Allocation resources provision CIDRs from the pool based on a greedy search and are stored in the `allocated_cidr` field. Data calls can also be used to read this information about allocations.
+
+Data Call Example
+```hcl
+data "ipam_allocation" "example" {
+  id        = "allocation_example_0"
+  pool_name = "pool_example"
 }
 ```
 
