@@ -1,6 +1,6 @@
 # Terraform IP Address Manager (tf-ipam)
 
-This repository contains the source code for the tf-ipam provider, a Terraform provider for IP Address Management.
+This repository contains the source code for the tf-ipam provider, a Terraform provider for IP Address Management. Pool resources specify a CIDR to disperse IP's from, and allocation resources are used to dynamically allocate IP's or subnets from the pool.
 
 Quick example
 ```hcl
@@ -27,6 +27,16 @@ resource "ipam_allocation" "example_1" {
   id            = "allocation_example_1"
   pool_name     = ipam_pool.example.name
   prefix_length = 27
+}
+```
+
+Allocation resources provision CIDRs from the pool based on a greedy search and are stored in the `allocated_cidr` field. Data calls can also be used to read this information about allocations.
+
+Data Call Example
+```hcl
+data "ipam_allocation" "example" {
+  id        = "allocation_example_0"
+  pool_name = "pool_example"
 }
 ```
 
