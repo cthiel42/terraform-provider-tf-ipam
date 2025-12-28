@@ -15,13 +15,13 @@ Features
 - Configurable storage backend (file-based storage by default)
 - Simple schema and minimal external dependencies — ideal for local development and CI workflows
 
-Quick example
+**Quick example**
 ```hcl
 terraform {
   required_providers {
     tfipam = {
       source = "cthiel42/tfipam"
-      version = "1.0.3"
+      version = "1.1.0"
     }
   }
 }
@@ -54,11 +54,62 @@ resource "tfipam_allocation" "example_1" {
 
 Allocation resources provision CIDRs from the pool based on a greedy search and are stored in the `allocated_cidr` field. Data calls can also be used to read this information about allocations.
 
-Data Call Example
+**Data Call Example**
 ```hcl
 data "tfipam_allocation" "example" {
   id        = "allocation_example_0"
   pool_name = "pool_example"
+}
+```
+
+## Provider Configuration
+
+This provider stores pool and allocation information in a separate file from Terraform's state. This is due to limitations within Terraform when accessing information about other resource's state, which is a core requirement for a parent-child resource relationship similar to what is implemented in this provider. There's currently a few storage backends implemented for this purpose. Their example configurations are detailed below.
+
+
+### File (Default)
+The file backend is the default backend. If you do not pass any parameters to the provider, it will store information in a file at `.terraform/ipam-storage.json` from the current working directory. To customize the location of the file, you can use a configuration similar to below.
+```hcl
+provider "tfipam" {
+  storage_type = "file"
+  file_path    = "ipam_storage_example.json"
+}
+```
+
+### AWS S3
+This will store a json file in the configured AWS S3 bucket. You can either explicity specify credentials for the provider to use, or rely on the SDK to determine them through ~/.aws/credentials or environment variables.
+
+**Credentials Declared Explicitly**
+```hcl
+provider "tfipam" {
+  storage_type         = "aws_s3"
+  s3_region            = "us-east-1"
+  s3_bucket_name       = "my-tfipam-bucket"
+  s3_object_key        = "ipam-storage.json" # Optional: defaults to "ipam-storage.json"
+  s3_access_key_id     = "AKIAABCDEFGHEXAMPLE"
+  s3_secret_access_key = "ACCESSKEYEXAMPLE1234567890"
+  # s3_session_token    = "token"              # Optional: for temporary credentials
+}
+```
+
+**Using Default AWS Credential Chain (env vars, ~/.aws/credentials, etc)**
+```hcl
+provider "tfipam" {
+  storage_type   = "aws_s3"
+  s3_region      = "us-east-1"
+  s3_bucket_name = "my-tfipam-bucket"
+  s3_object_key  = "ipam-storage.json"
+}
+```
+
+### Azure
+This will store a json file in the configured Azure Blob Container.
+```hcl
+provider "tfipam" {
+  storage_type            = "azure_blob"
+  azure_connection_string = "DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=mykey;EndpointSuffix=core.windows.net"
+  azure_container_name    = "tfipam"
+  azure_blob_name         = "ipam-storage.json" # Optional: defaults to "ipam-storage.json"
 }
 ```
 
@@ -67,5 +118,14 @@ data "tfipam_allocation" "example" {
 
 ### Optional
 
-- `file_path` (String) Path to storage file for 'file' storage backend. Defaults to '.terraform/ipam-storage.json'
-- `storage_type` (String) Storage backend type. Supported values: 'file' (default)
+- `file_path` (String) Storage backend type. Supported values: 'file' (default), 'azure_blob' (Azure Blob Storage), 'aws_s3' (AWS S3).
+- `storage_type` (String) Path to storage file for 'file' storage backend. Defaults to '.terraform/ipam-storage.json'.
+- `azure_connection_string` (String) Connection string for Azure Blob Storage. Required for 'azure_blob' backend.
+- `azure_container_name` (String) Container name for Azure Blob Storage. Required for 'azure_blob' backend.
+- `azure_blob_name` (String) Blob name for Azure Blob Storage. Defaults to 'ipam-storage.json'.
+- `s3_region` (String) AWS region for S3 bucket. Required for 'aws_s3' backend.
+- `s3_bucket_name` (String) S3 bucket name. Required for 'aws_s3' backend.
+- `s3_object_key` (String) S3 object key (file path). Defaults to 'ipam-storage.json'
+- `s3_access_key_id` (String) AWS Access Key ID used by 'aws_s3' storage method. Optional - uses default AWS credential chain if not provided.
+- `s3_secret_access_key` (String) AWS Secret Access Key. Required if s3_access_key_id is provided.
+- `s3_session_token` (String) AWS Session Token. Optional - for temporary credentials.

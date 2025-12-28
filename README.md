@@ -16,7 +16,7 @@ terraform {
   required_providers {
     tfipam = {
       source = "cthiel42/tfipam"
-      version = "1.0.3"
+      version = "1.1.0"
     }
   }
 }
@@ -57,8 +57,58 @@ data "tfipam_allocation" "example" {
 }
 ```
 
-This provider requires a backend for IPAM information to be stored. While I sought out to store everything in Terraform's state, I found limitations within Terraform that prevented this from being a reality with parent-child resources like this provider implements. As a result, having a backend to store this information was a necessity. I have made an attempt to have a few commonly used backends built in. If there's other backends that would be useful, please open a GitHub issue with your suggestions. I also welcome PR's.
+## Provider Configuration
 
+This provider stores pool and allocation information in a separate file from Terraform's state. This is due to limitations within Terraform when accessing information about other resource's state, which is a core requirement for a parent-child resource relationship similar to what is implemented in this provider. There's currently a few storage backends implemented for this purpose. Their example configurations are detailed below.
+
+
+### File (Default)
+The file backend is the default backend. If you do not pass any parameters to the provider, it will store information in a file at `.terraform/ipam-storage.json` from the current working directory. To customize the location of the file, you can use a configuration similar to below.
+```hcl
+provider "tfipam" {
+  storage_type = "file"
+  file_path    = "ipam_storage_example.json"
+}
+```
+
+### AWS S3
+This will store a json file in the configured AWS S3 bucket. You can either explicity specify credentials for the provider to use, or rely on the SDK to determine them through ~/.aws/credentials or environment variables.
+
+**Credentials Declared Explicitly**
+```hcl
+provider "tfipam" {
+  storage_type         = "aws_s3"
+  s3_region            = "us-east-1"
+  s3_bucket_name       = "my-tfipam-bucket"
+  s3_object_key        = "ipam-storage.json" # Optional: defaults to "ipam-storage.json"
+  s3_access_key_id     = "AKIAABCDEFGHEXAMPLE"
+  s3_secret_access_key = "ACCESSKEYEXAMPLE1234567890"
+  # s3_session_token    = "token"              # Optional: for temporary credentials
+}
+```
+
+**Using Default AWS Credential Chain (env vars, ~/.aws/credentials, etc)**
+```hcl
+provider "tfipam" {
+  storage_type   = "aws_s3"
+  s3_region      = "us-east-1"
+  s3_bucket_name = "my-tfipam-bucket"
+  s3_object_key  = "ipam-storage.json"
+}
+```
+
+### Azure
+This will store a json file in the configured Azure Blob Container.
+```hcl
+provider "tfipam" {
+  storage_type            = "azure_blob"
+  azure_connection_string = "DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=mykey;EndpointSuffix=core.windows.net"
+  azure_container_name    = "tfipam"
+  azure_blob_name         = "ipam-storage.json" # Optional: defaults to "ipam-storage.json"
+}
+```
+
+## Folder Structure
 
 - `examples/` contains helpful examples to get you started
 - `internal/` contains the source source for the provider

@@ -29,9 +29,9 @@ type s3Data struct {
 }
 
 // NewS3Storage creates a new AWS S3 Storage backend
-// region: AWS region (e.g., "us-east-1")
+// region: AWS region (e.g. "us-east-1")
 // bucketName: Name of the S3 bucket
-// objectKey: S3 object key (path to the JSON file, e.g., "ipam-storage.json")
+// objectKey: S3 object key (path to the JSON file, e.g. "ipam-storage.json")
 // accessKeyID: AWS Access Key ID (optional, uses default credential chain if empty)
 // secretAccessKey: AWS Secret Access Key (optional, required if accessKeyID is provided)
 // sessionToken: AWS Session Token (optional, for temporary credentials)
@@ -70,7 +70,7 @@ func NewS3Storage(region, bucketName, objectKey, accessKeyID, secretAccessKey, s
 			})),
 		)
 	} else {
-		// Use default credential chain (env vars, ~/.aws/credentials, IAM role, etc.)
+		// Use default credential chain (env vars, ~/.aws/credentials, IAM role, etc)
 		cfg, err = config.LoadDefaultConfig(ctx, config.WithRegion(region))
 	}
 

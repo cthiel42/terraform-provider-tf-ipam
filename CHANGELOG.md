@@ -1,7 +1,8 @@
-## v1.0.0
+## v1.1.0
 
 FEATURES
 - IPAM Storage now supports Azure Blob Storage
+- IPAM Storage now supports AWS S3
 
 UPDATES:
 - Test cases created for all provider resources and data sources

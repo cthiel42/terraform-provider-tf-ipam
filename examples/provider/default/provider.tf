@@ -1,5 +1,5 @@
 // By default, the provider will store data at 
-// .terraform/ipam_data.json in the current working
+// .terraform/ipam-storage.json in the current working
 // directory. The file_storage example show how to
 // customize this location. 
 

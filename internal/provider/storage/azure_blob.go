@@ -29,7 +29,7 @@ type blobData struct {
 // NewAzureBlobStorage creates a new Azure Blob Storage backend
 // connectionString: Azure Storage connection string
 // containerName: Name of the blob container
-// blobName: Name of the blob file (e.g., "ipam-storage.json")
+// blobName: Name of the blob file (e.g. "ipam-storage.json")
 func NewAzureBlobStorage(connectionString, containerName, blobName string) (*AzureBlobStorage, error) {
 	if connectionString == "" {
 		return nil, errors.New("azure connection string is required")
@@ -56,10 +56,9 @@ func NewAzureBlobStorage(connectionString, containerName, blobName string) (*Azu
 		},
 	}
 
-	// try to load existing data
+	// try to load existing data, if it doesn't exist it'll be created on first save
 	ctx := context.Background()
 	if err := abs.load(ctx); err != nil {
-		// If blob doesn't exist, that's okay - we'll create it on first save
 		if !bloberror.HasCode(err, bloberror.BlobNotFound) {
 			return nil, fmt.Errorf("failed to load storage blob: %w", err)
 		}
