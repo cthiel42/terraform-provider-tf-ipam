@@ -336,7 +336,7 @@ func TestAccAllocationDataSource_LargePool(t *testing.T) {
 	})
 }
 
-// testAccAllocationDataSourceConfig generates a Terraform configuration with pool, allocation, and data source
+// testAccAllocationDataSourceConfig generates a Terraform configuration with pool, allocation, and data source.
 func testAccAllocationDataSourceConfig(poolName, allocID string, prefixLength int) string {
 	return fmt.Sprintf(`
 resource "tfipam_pool" "test" {
@@ -357,7 +357,7 @@ data "tfipam_allocation" "test" {
 `, poolName, allocID, prefixLength)
 }
 
-// testAccAllocationDataSourceConfigNotFound generates config that tries to read a non-existent allocation
+// testAccAllocationDataSourceConfigNotFound generates config that tries to read a non-existent allocation.
 func testAccAllocationDataSourceConfigNotFound(poolName, allocID string) string {
 	return fmt.Sprintf(`
 resource "tfipam_pool" "test" {
@@ -372,7 +372,7 @@ data "tfipam_allocation" "test" {
 `, poolName, allocID)
 }
 
-// testAccAllocationDataSourceConfigMultiple generates config with multiple allocations and data sources
+// testAccAllocationDataSourceConfigMultiple generates config with multiple allocations and data sources.
 func testAccAllocationDataSourceConfigMultiple(poolName string, prefixLength int) string {
 	return fmt.Sprintf(`
 resource "tfipam_pool" "test" {
@@ -415,7 +415,7 @@ data "tfipam_allocation" "test3" {
 `, poolName, prefixLength)
 }
 
-// testAccAllocationDataSourceConfigDifferentPrefixes generates config with different prefix lengths
+// testAccAllocationDataSourceConfigDifferentPrefixes generates config with different prefix lengths.
 func testAccAllocationDataSourceConfigDifferentPrefixes(poolName string) string {
 	return fmt.Sprintf(`
 resource "tfipam_pool" "test" {
@@ -469,7 +469,7 @@ data "tfipam_allocation" "test_32" {
 `, poolName)
 }
 
-// testAccAllocationDataSourceConfigIPv6 generates config for IPv6 allocation data source
+// testAccAllocationDataSourceConfigIPv6 generates config for IPv6 allocation data source.
 func testAccAllocationDataSourceConfigIPv6(poolName, allocID string, prefixLength int) string {
 	return fmt.Sprintf(`
 resource "tfipam_pool" "test" {
@@ -490,7 +490,7 @@ data "tfipam_allocation" "test" {
 `, poolName, allocID, prefixLength)
 }
 
-// testAccAllocationDataSourceConfigIPv6Multiple generates config for multiple IPv6 allocations
+// testAccAllocationDataSourceConfigIPv6Multiple generates config for multiple IPv6 allocations.
 func testAccAllocationDataSourceConfigIPv6Multiple(poolName string) string {
 	return fmt.Sprintf(`
 resource "tfipam_pool" "test" {
@@ -533,7 +533,7 @@ data "tfipam_allocation" "test_64" {
 `, poolName)
 }
 
-// testAccAllocationDataSourceConfigDifferentPools generates config with allocations from different pools
+// testAccAllocationDataSourceConfigDifferentPools generates config with allocations from different pools.
 func testAccAllocationDataSourceConfigDifferentPools() string {
 	return `
 resource "tfipam_pool" "pool1" {
@@ -586,7 +586,7 @@ data "tfipam_allocation" "test3" {
 `
 }
 
-// testAccAllocationDataSourceConfigVerifyCIDR generates config to verify CIDR values match between resource and data source
+// testAccAllocationDataSourceConfigVerifyCIDR generates config to verify CIDR values match between resource and data source.
 func testAccAllocationDataSourceConfigVerifyCIDR(poolName, allocID string, prefixLength int) string {
 	return fmt.Sprintf(`
 resource "tfipam_pool" "test" {
@@ -607,7 +607,7 @@ data "tfipam_allocation" "test" {
 `, poolName, allocID, prefixLength)
 }
 
-// testAccAllocationDataSourceConfigLargePool generates config with many allocations
+// testAccAllocationDataSourceConfigLargePool generates config with many allocations.
 func testAccAllocationDataSourceConfigLargePool(poolName string) string {
 	config := fmt.Sprintf(`
 resource "tfipam_pool" "test" {
